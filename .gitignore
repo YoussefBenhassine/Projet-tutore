@@ -62,6 +62,10 @@ models/
 *.txt
 !requirements.txt
 
+# Fichiers de travail individuels
+explortion.py
+pretraitement.py
+
 # ============================================================
 # Logs et fichiers temporaires
 # ============================================================

@@ -1,17 +1,32 @@
-# ESG Dataset Clustering Pipeline
+# ESG Dataset Clustering & Prediction Pipeline
 
-A comprehensive clustering pipeline for ESG (Environmental, Social, Governance) datasets using three different algorithms: K-Means, Gaussian Mixture Models (GMM), and HDBSCAN.
+A comprehensive pipeline for ESG (Environmental, Social, Governance) datasets featuring:
+- **Unsupervised Learning**: Clustering using K-Means, Gaussian Mixture Models (GMM), and HDBSCAN
+- **Supervised Learning**: ESG Score prediction using Random Forest and LightGBM regressors
 
 ## 🎯 Project Overview
 
-This project provides a complete end-to-end solution for clustering ESG datasets with:
+This project provides a complete end-to-end solution for ESG data analysis with:
 
+### Unsupervised Learning (Clustering)
 - **Data Preprocessing**: Missing value handling, feature scaling, and PCA for visualization
 - **Multiple Clustering Algorithms**: K-Means, GMM, and HDBSCAN
 - **Hyperparameter Optimization**: Automatic optimization for all three algorithms
 - **Model Evaluation**: Comprehensive comparison using multiple metrics
 - **Cluster Interpretation**: Automatic profiling and interpretation of clusters
-- **Interactive Dashboard**: Streamlit-based UI for easy exploration
+
+### Supervised Learning (Prediction)
+- **ESG Score Prediction**: Predict ESG scores using cluster-enriched features
+- **Multiple Models**: Random Forest and LightGBM regressors
+- **Hyperparameter Optimization**: Optuna-based optimization with cross-validation
+- **Comprehensive Metrics**: R², RMSE, MAE, MAPE
+- **Feature Importance Analysis**: Understand which features drive predictions
+- **Model Comparison**: Side-by-side comparison with visualizations
+
+### Interactive Dashboard
+- **Streamlit-based UI**: Easy-to-use interface for both clustering and prediction
+- **Real-time Visualizations**: Interactive plots and charts
+- **Model Download**: Save trained models for production use
 
 ## 📋 Features
 
@@ -50,6 +65,18 @@ This project provides a complete end-to-end solution for clustering ESG datasets
 - ✅ Cluster profiling and interpretation
 - ✅ Downloadable results (CSV)
 
+### ESG Score Prediction
+- ✅ **Random Forest Regressor**: Ensemble method with feature importance
+- ✅ **LightGBM Regressor**: Gradient boosting with fast training
+- ✅ **Optuna Optimization**: Automated hyperparameter tuning
+- ✅ **Cross-Validation**: K-Fold CV for robust evaluation
+- ✅ **Comprehensive Metrics**: R², RMSE, MAE, MAPE
+- ✅ **Feature Importance**: Visualize which features matter most
+- ✅ **Prediction vs True Values**: Scatter plots and residual analysis
+- ✅ **New Data Prediction**: Input form for predicting new ESG scores
+- ✅ **Model Persistence**: Save and load trained models
+- ✅ **Cluster-Enriched Features**: Use cluster labels as additional features
+
 ## 🚀 Installation
 
 ### Prerequisites
@@ -81,6 +108,8 @@ This project provides a complete end-to-end solution for clustering ESG datasets
 2. **The app will open in your browser** (usually at `http://localhost:8501`)
 
 3. **Follow these steps in the app**:
+   
+   **For Clustering:**
    - **Load Data**: Click "Load & Preprocess Data" in the sidebar
    - **Elbow Method** (optional): Use the "Méthode du Coude" section to find optimal K for K-Means
    - **Choose Algorithms**: Select which clustering algorithms to use
@@ -88,6 +117,18 @@ This project provides a complete end-to-end solution for clustering ESG datasets
    - **Run Clustering**: Click "Run Clustering" to execute
    - **View Results**: Explore results in the "Results" and "Visualizations" tabs
    - **Download**: Download the labeled dataset as CSV
+   
+   **For Prediction:**
+   - **Complete Clustering First**: Run clustering and download the results to create `data/esg_clustered_results.csv`
+   - **Go to Prediction Tab**: Navigate to "🔮 ESG Score Prediction" tab
+   - **Note**: The prediction module uses `data/esg_clustered_results.csv` which includes cluster labels
+   - **Select Models**: Choose Random Forest and/or LightGBM
+   - **Configure Training**: Set optimization trials, CV folds, and test split
+   - **Include Cluster Labels**: Optionally include the Cluster column as a feature
+   - **Train Models**: Click "🚀 Train Regression Models"
+   - **View Results**: Explore metrics, visualizations, and feature importance
+   - **Predict New Scores**: Use the input form to predict ESG scores for new data
+   - **Download Model**: Save the best model for production use
 
 ### Using the Modules Programmatically
 
@@ -140,16 +181,31 @@ interpretations = profiler.get_cluster_interpretations(data_scaled, labels_kmean
 
 ```
 esgprojetfinal/
-├── app.py                 # Streamlit dashboard
-├── preprocessing.py       # Data loading and preprocessing
-├── clustering.py          # Clustering algorithms (KMeans, GMM, HDBSCAN)
-├── optimization.py        # Hyperparameter optimization
-├── evaluation.py          # Model evaluation and comparison
-├── labeling.py            # Cluster profiling and interpretation
-├── requirements.txt       # Python dependencies
-├── README.md             # This file
+├── app.py                      # Streamlit dashboard
+├── preprocessing.py            # Data loading and preprocessing
+├── clustering.py               # Clustering algorithms (KMeans, GMM, HDBSCAN)
+├── optimization.py             # Hyperparameter optimization (clustering)
+├── evaluation.py               # Clustering evaluation and comparison
+├── labeling.py                 # Cluster profiling and interpretation
+├── requirements.txt            # Python dependencies
+├── README.md                   # This file
+├── prediction/                 # Supervised learning models
+│   ├── __init__.py
+│   ├── regression_random_forest.py    # Random Forest regressor
+│   └── regression_lightgbm.py        # LightGBM regressor
+├── training/                   # Training utilities
+│   ├── __init__.py
+│   └── train_regressors.py    # Model training pipeline
+├── evaluation/                 # Regression evaluation
+│   ├── __init__.py
+│   └── regression_metrics.py  # R², RMSE, MAE, MAPE metrics
+├── utils/                      # Utility functions
+│   ├── __init__.py
+│   └── model_selection.py      # Model comparison utilities
+├── models/                     # Saved models
+│   └── best_model.pkl         # Best trained model (generated)
 └── data/
-    └── esg_dataset.csv   # Your ESG dataset
+    └── esg_dataset.csv        # Your ESG dataset
 ```
 
 ## 🔧 Configuration
@@ -172,7 +228,7 @@ You can modify these in the `optimization.py` file or use manual parameters in t
 
 ## 📊 Output
 
-The pipeline generates:
+### Clustering Output
 1. **Preprocessed dataset**: Scaled and cleaned data
 2. **Cluster labels**: Assigned cluster for each sample
 3. **Model comparison**: Metrics for all three algorithms
@@ -182,11 +238,31 @@ The pipeline generates:
 7. **Visualizations**: 2D/3D PCA plots colored by clusters
 8. **Labeled dataset**: CSV file with original data + cluster labels
 
+### Prediction Output
+1. **Trained models**: Random Forest and/or LightGBM regressors
+2. **Performance metrics**: R², RMSE, MAE, MAPE (test and CV)
+3. **Model comparison**: Side-by-side comparison DataFrame
+4. **Visualizations**: 
+   - Prediction vs True values scatter plots
+   - Residuals distribution
+   - Feature importance plots
+   - Radar charts and bar comparisons
+5. **Best model**: Automatically selected based on R² score
+6. **Saved model**: Pickle file of the best model (`models/best_model.pkl`)
+7. **Predictions CSV**: Test set predictions with residuals
+
 ## 🎓 Understanding the Metrics
 
+### Clustering Metrics
 - **Silhouette Score**: Measures how similar an object is to its own cluster vs. other clusters. Range: -1 to 1 (higher is better)
 - **Davies-Bouldin Index**: Average similarity ratio of clusters. Lower is better
 - **Calinski-Harabasz Score**: Ratio of between-clusters to within-cluster dispersion. Higher is better
+
+### Regression Metrics
+- **R² Score (Coefficient of Determination)**: Proportion of variance explained by the model. Range: -∞ to 1 (higher is better, 1 = perfect prediction)
+- **RMSE (Root Mean Squared Error)**: Square root of average squared errors. Lower is better, in same units as target
+- **MAE (Mean Absolute Error)**: Average absolute difference between predicted and true values. Lower is better, in same units as target
+- **MAPE (Mean Absolute Percentage Error)**: Average percentage error. Lower is better, expressed as percentage
 
 ### 📊 Elbow Method
 
@@ -235,6 +311,7 @@ If you have **too many noise points** (>15-20% of your dataset), try:
 
 ### Common Issues
 
+**Clustering:**
 1. **FileNotFoundError**: Make sure `esg_dataset.csv` is in the `data/` directory
 2. **Memory Error**: For large datasets, consider reducing the hyperparameter search space
 3. **No clusters found (HDBSCAN)**: Try reducing `min_cluster_size` or `min_samples`
@@ -244,6 +321,20 @@ If you have **too many noise points** (>15-20% of your dataset), try:
    - Reduce `min_samples` to 2-3
    - Use the "Réassigner les points de bruit" option in the UI
    - The optimization now automatically favors configurations with less noise
+
+**Prediction:**
+1. **ImportError for LightGBM**: Install with `pip install lightgbm`
+2. **ImportError for Optuna**: Install with `pip install optuna`
+3. **Target column not found**: Ensure your dataset has the target column (default: `ESG_Score`)
+4. **Model training fails**: 
+   - Ensure clustering has been completed first (for cluster-enriched features)
+   - Check that the dataset has sufficient samples (minimum 20-30 for meaningful training)
+   - Reduce optimization trials if training is too slow
+5. **Poor prediction performance**:
+   - Try including/excluding cluster labels as features
+   - Increase optimization trials for better hyperparameters
+   - Check feature importance to identify relevant features
+   - Ensure target variable has sufficient variance
 
 ### Performance Tips
 

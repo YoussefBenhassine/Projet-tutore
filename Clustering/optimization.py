@@ -11,7 +11,7 @@ from typing import Dict, List, Tuple, Optional
 import numpy as np
 import pandas as pd
 from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score
-from clustering import ClusteringModels
+from .clustering import ClusteringModels
 
 
 class HyperparameterOptimizer:

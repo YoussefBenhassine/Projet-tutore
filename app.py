@@ -21,11 +21,16 @@ import plotly.express as px
 import plotly.graph_objects as go
 from typing import Dict, Optional
 
-from preprocessing import DataPreprocessor
-from clustering import ClusteringModels
-from optimization import HyperparameterOptimizer
-from evaluation import ClusteringEvaluator
-from labeling import ClusterProfiler
+from Clustering.preprocessing import DataPreprocessor
+from Clustering.clustering import ClusteringModels
+from Clustering.optimization import HyperparameterOptimizer
+from Clustering.evaluation import ClusteringEvaluator
+from Clustering.labeling import ClusterProfiler
+from training.train_regressors import RegressionTrainer
+from utils.model_selection import ModelComparator
+from evaluation.regression_metrics import RegressionMetrics
+import pickle
+import os
 
 # Page configuration
 st.set_page_config(
@@ -79,6 +84,14 @@ if 'comparison_df' not in st.session_state:
     st.session_state.comparison_df = None
 if 'evaluator' not in st.session_state:
     st.session_state.evaluator = None
+if 'regression_trainer' not in st.session_state:
+    st.session_state.regression_trainer = None
+if 'regression_results' not in st.session_state:
+    st.session_state.regression_results = {}
+if 'best_regression_model' not in st.session_state:
+    st.session_state.best_regression_model = None
+if 'regression_comparison_df' not in st.session_state:
+    st.session_state.regression_comparison_df = None
 
 def main():
     """Main application function."""
@@ -174,12 +187,14 @@ def main():
         clear_cache_btn = st.button("🗑️ Clear Cache", use_container_width=True)
     
     # Main content
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📋 Dataset", 
         "🔧 Preprocessing", 
         "🎯 Clustering", 
         "📊 Results", 
-        "📈 Visualizations"
+        "📈 Visualizations",
+        "🔮 ESG Score Prediction",
+        "⚖️ Comparaison Clustering"
     ])
     
     # Tab 1: Dataset
@@ -677,112 +692,980 @@ def main():
     
     # Tab 5: Visualizations
     with tab5:
-        st.header("Visualizations")
+        st.header("📈 Visualizations")
         
-        if st.session_state.data_scaled is None:
-            st.info("👆 Load data first.")
-        elif not st.session_state.labels:
-            st.info("👆 Run clustering first to see visualizations.")
+        # Check if clustered results dataset exists
+        clustered_dataset_path = "data/esg_clustered_results.csv"
+        
+        if not os.path.exists(clustered_dataset_path):
+            st.warning("⚠️ Clustered results dataset not found. Please run clustering first and download the results.")
         else:
-            # Select model for visualization
-            model_selection = st.selectbox(
-                "Select Model for Visualization",
-                options=list(st.session_state.labels.keys()),
-                index=0 if st.session_state.best_model is None 
-                       else list(st.session_state.labels.keys()).index(st.session_state.best_model)
-            )
-            
-            labels_viz = st.session_state.labels[model_selection]
-            
-            # Show cluster info
-            unique_labels_viz = set(labels_viz)
-            n_clusters_viz = len(unique_labels_viz) - (1 if -1 in unique_labels_viz else 0)
-            n_noise_viz = int(np.sum(labels_viz == -1)) if -1 in labels_viz else 0
-            
-            if n_noise_viz > 0:
-                noise_ratio = n_noise_viz / len(labels_viz) * 100
-                if noise_ratio > 30:
-                    st.error(f"⚠️ **{model_selection.upper()}**: {n_clusters_viz} clusters + {n_noise_viz} points de bruit ({noise_ratio:.1f}% - TROP ÉLEVÉ!)")
-                    st.warning("💡 **Conseil**: Réduisez `min_cluster_size` et `min_samples` dans la sidebar, ou activez 'Réassigner les points de bruit'")
-                elif noise_ratio > 15:
-                    st.warning(f"⚠️ **{model_selection.upper()}**: {n_clusters_viz} clusters + {n_noise_viz} points de bruit ({noise_ratio:.1f}%)")
+            # Load the dataset
+            try:
+                clustered_df = pd.read_csv(clustered_dataset_path)
+                st.success(f"✅ Dataset loaded: {len(clustered_df)} samples")
+                
+                # Check if Cluster column exists
+                if 'Cluster' not in clustered_df.columns:
+                    st.error("❌ Cluster column not found in the dataset. Please run clustering first.")
                 else:
-                    st.info(f"📊 **{model_selection.upper()}**: {n_clusters_viz} clusters + {n_noise_viz} points de bruit ({noise_ratio:.1f}%)")
+                    # Prepare data for visualization
+                    from sklearn.preprocessing import StandardScaler
+                    from sklearn.decomposition import PCA
+                    from sklearn.impute import SimpleImputer
+                    
+                    # Extract feature columns (exclude metadata)
+                    exclude_cols = ['Company_ID', 'Sector', 'Cluster_Name', 'ESG_Score', 'Cluster']
+                    feature_cols = [col for col in clustered_df.columns 
+                                   if col not in exclude_cols and clustered_df[col].dtype in ['int64', 'float64']]
+                    
+                    if len(feature_cols) == 0:
+                        st.error("❌ No numeric features found for visualization.")
+                    else:
+                        # Extract features
+                        X = clustered_df[feature_cols].copy()
+                        
+                        # Handle missing values
+                        imputer = SimpleImputer(strategy='mean')
+                        X_imputed = pd.DataFrame(
+                            imputer.fit_transform(X),
+                            columns=X.columns,
+                            index=X.index
+                        )
+                        
+                        # Scale features
+                        scaler = StandardScaler()
+                        X_scaled = pd.DataFrame(
+                            scaler.fit_transform(X_imputed),
+                            columns=X_imputed.columns,
+                            index=X_imputed.index
+                        )
+                        
+                        # Get cluster labels
+                        cluster_labels = clustered_df['Cluster'].astype(int).values
+                        
+                        # Calculate PCA
+                        pca_2d = PCA(n_components=2, random_state=42)
+                        pca_3d = PCA(n_components=3, random_state=42)
+                        
+                        pca_2d_result = pca_2d.fit_transform(X_scaled)
+                        pca_3d_result = pca_3d.fit_transform(X_scaled)
+                        
+                        # Get cluster statistics
+                        unique_clusters = np.unique(cluster_labels)
+                        n_clusters = len(unique_clusters) - (1 if -1 in unique_clusters else 0)
+                        n_noise = np.sum(cluster_labels == -1) if -1 in unique_clusters else 0
+                        
+                        # Display cluster info
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Total Samples", len(clustered_df))
+                        with col2:
+                            st.metric("Number of Clusters", n_clusters)
+                        with col3:
+                            st.metric("Noise Points", n_noise)
+                        
+                        if n_noise > 0:
+                            noise_pct = (n_noise / len(cluster_labels)) * 100
+                            if noise_pct > 30:
+                                st.error(f"⚠️ High noise ratio: {noise_pct:.1f}%")
+                            elif noise_pct > 15:
+                                st.warning(f"⚠️ Moderate noise ratio: {noise_pct:.1f}%")
+                            else:
+                                st.info(f"ℹ️ Noise ratio: {noise_pct:.1f}%")
+                        
+                        st.divider()
+                        
+                        # 2D PCA Visualization
+                        st.subheader("🔵 2D PCA Visualization")
+                        
+                        # Create DataFrame for easier plotting
+                        pca_2d_df = pd.DataFrame({
+                            'PC1': pca_2d_result[:, 0],
+                            'PC2': pca_2d_result[:, 1],
+                            'Cluster': cluster_labels
+                        })
+                        
+                        # Calculate explained variance
+                        explained_var_2d = pca_2d.explained_variance_ratio_
+                        total_var_2d = explained_var_2d.sum() * 100
+                        
+                        # Create 2D plot using plotly express
+                        fig_2d = px.scatter(
+                            pca_2d_df,
+                            x='PC1',
+                            y='PC2',
+                            color='Cluster',
+                            color_discrete_sequence=px.colors.qualitative.Set3,
+                            title=f"2D PCA Plot ({n_clusters} clusters" + 
+                                  (f" + {n_noise} noise)" if n_noise > 0 else "") + 
+                                  f" - {total_var_2d:.1f}% variance explained",
+                            labels={
+                                'PC1': f'PC1 ({explained_var_2d[0]*100:.1f}% variance)',
+                                'PC2': f'PC2 ({explained_var_2d[1]*100:.1f}% variance)'
+                            },
+                            hover_data=['Cluster']
+                        )
+                        
+                        # Update marker size and style
+                        fig_2d.update_traces(
+                            marker=dict(size=7, opacity=0.7, line=dict(width=0.5, color='white')),
+                            selector=dict(mode='markers')
+                        )
+                        
+                        # Update layout
+                        fig_2d.update_layout(
+                            width=900,
+                            height=700,
+                            hovermode='closest'
+                        )
+                        
+                        st.plotly_chart(fig_2d, use_container_width=True)
+                        
+                        st.divider()
+                        
+                        # 3D PCA Visualization
+                        st.subheader("🔷 3D PCA Visualization")
+                        
+                        # Create DataFrame for easier plotting
+                        pca_3d_df = pd.DataFrame({
+                            'PC1': pca_3d_result[:, 0],
+                            'PC2': pca_3d_result[:, 1],
+                            'PC3': pca_3d_result[:, 2],
+                            'Cluster': cluster_labels
+                        })
+                        
+                        # Calculate explained variance for 3D
+                        explained_var_3d = pca_3d.explained_variance_ratio_
+                        total_var_3d = explained_var_3d.sum() * 100
+                        
+                        # Create 3D plot using plotly express
+                        fig_3d = px.scatter_3d(
+                            pca_3d_df,
+                            x='PC1',
+                            y='PC2',
+                            z='PC3',
+                            color='Cluster',
+                            color_discrete_sequence=px.colors.qualitative.Set3,
+                            title=f"3D PCA Plot ({n_clusters} clusters" + 
+                                  (f" + {n_noise} noise)" if n_noise > 0 else "") + 
+                                  f" - {total_var_3d:.1f}% variance explained",
+                            labels={
+                                'PC1': f'PC1 ({explained_var_3d[0]*100:.1f}% variance)',
+                                'PC2': f'PC2 ({explained_var_3d[1]*100:.1f}% variance)',
+                                'PC3': f'PC3 ({explained_var_3d[2]*100:.1f}% variance)'
+                            },
+                            hover_data=['Cluster']
+                        )
+                        
+                        # Update marker size and style
+                        fig_3d.update_traces(
+                            marker=dict(size=4, opacity=0.7, line=dict(width=0.5, color='white')),
+                            selector=dict(mode='markers')
+                        )
+                        
+                        # Update layout
+                        fig_3d.update_layout(
+                            width=900,
+                            height=700,
+                            hovermode='closest',
+                            scene=dict(bgcolor='rgba(0,0,0,0)')
+                        )
+                        
+                        st.plotly_chart(fig_3d, use_container_width=True)
+                        
+                        st.divider()
+                        
+                        # Cluster Size Distribution
+                        st.subheader("📊 Cluster Size Distribution")
+                        
+                        cluster_counts = pd.Series(cluster_labels).value_counts().sort_index()
+                        
+                        # Separate noise from clusters
+                        if -1 in cluster_counts.index:
+                            noise_count = cluster_counts[-1]
+                            cluster_counts_clean = cluster_counts.drop(-1)
+                        else:
+                            cluster_counts_clean = cluster_counts
+                            noise_count = 0
+                        
+                        # Create bar chart
+                        fig_bar = go.Figure()
+                        
+                        fig_bar.add_trace(go.Bar(
+                            x=cluster_counts_clean.index.astype(str),
+                            y=cluster_counts_clean.values,
+                            marker_color='lightblue',
+                            text=cluster_counts_clean.values,
+                            textposition='outside',
+                            hovertemplate='Cluster: %{x}<br>Count: %{y}<extra></extra>'
+                        ))
+                        
+                        fig_bar.update_layout(
+                            title=f"Cluster Sizes (Total: {len(cluster_counts_clean)} clusters)",
+                            xaxis_title='Cluster ID',
+                            yaxis_title='Number of Samples',
+                            width=800,
+                            height=500
+                        )
+                        
+                        st.plotly_chart(fig_bar, use_container_width=True)
+                        
+                        # Display cluster size table
+                        cluster_size_df = pd.DataFrame({
+                            'Cluster': cluster_counts_clean.index.astype(int),
+                            'Size': cluster_counts_clean.values,
+                            'Percentage': (cluster_counts_clean.values / len(cluster_labels) * 100).round(2)
+                        })
+                        
+                        if noise_count > 0:
+                            noise_row = pd.DataFrame({
+                                'Cluster': [-1],
+                                'Size': [noise_count],
+                                'Percentage': [(noise_count / len(cluster_labels) * 100).round(2)]
+                            })
+                            cluster_size_df = pd.concat([cluster_size_df, noise_row], ignore_index=True)
+                        
+                        st.dataframe(cluster_size_df, use_container_width=True)
+                        
+            except Exception as e:
+                st.error(f"❌ Error loading or processing data: {str(e)}")
+                with st.expander("🔍 Error Details"):
+                    import traceback
+                    st.code(traceback.format_exc())
+    
+    # Tab 6: ESG Score Prediction
+    with tab6:
+        st.header("🔮 ESG Score Prediction")
+        
+        # Use clustered results dataset for prediction
+        clustered_dataset_path = "data/esg_clustered_results.csv"
+        
+        # Check if clustered results file exists
+        if not os.path.exists(clustered_dataset_path):
+            st.warning("⚠️ Clustered results dataset not found. Please run clustering first and download the results.")
+            st.info("💡 **Note**: The prediction module uses `data/esg_clustered_results.csv` which includes cluster labels. "
+                   "Make sure to run clustering and download the results first.")
+        else:
+            st.info("ℹ️ **Using dataset**: `data/esg_clustered_results.csv` (includes cluster labels from clustering phase)")
+            # Configuration section
+            col1, col2 = st.columns(2)
             
-            # 2D PCA Plot
-            st.subheader("2D PCA Visualization")
+            with col1:
+                st.subheader("Model Selection")
+                use_rf = st.checkbox("Random Forest", value=True)
+                use_lgbm = st.checkbox("LightGBM", value=True)
+                
+                st.subheader("Training Configuration")
+                use_optimization = st.checkbox("Use Hyperparameter Optimization", value=True)
+                n_trials = st.slider("Optimization Trials", min_value=10, max_value=100, value=50, 
+                                   disabled=not use_optimization)
+                cv_folds = st.slider("Cross-Validation Folds", min_value=3, max_value=10, value=5)
+                include_clusters = st.checkbox("Include Cluster Labels as Features", value=True)
             
-            # Create custom color map to highlight noise
-            if -1 in labels_viz:
-                color_map = {str(-1): 'Noise (Outliers)'}
-                for i in range(n_clusters_viz):
-                    color_map[str(i)] = f'Cluster {i}'
-            else:
-                color_map = {str(i): f'Cluster {i}' for i in range(n_clusters_viz)}
+            with col2:
+                st.subheader("Target Variable")
+                # Load clustered dataset to get available columns
+                try:
+                    clustered_df = pd.read_csv(clustered_dataset_path, nrows=1)
+                    available_columns = clustered_df.columns.tolist()
+                    target_column = st.selectbox(
+                        "Select Target Column",
+                        options=available_columns,
+                        index=available_columns.index('ESG_Score') 
+                              if 'ESG_Score' in available_columns else 0
+                    )
+                except Exception as e:
+                    st.error(f"Error loading clustered dataset: {str(e)}")
+                    target_column = 'ESG_Score'
+                
+                st.subheader("Test Split")
+                test_size = st.slider("Test Set Size", min_value=0.1, max_value=0.4, value=0.2, step=0.05)
             
-            fig_2d = px.scatter(
-                x=st.session_state.data_pca_2d['PC1'],
-                y=st.session_state.data_pca_2d['PC2'],
-                color=labels_viz.astype(str),
-                labels={'color': 'Cluster'},
-                title=f"2D PCA Plot - {model_selection.upper()} ({n_clusters_viz} clusters" + 
-                      (f" + {n_noise_viz} noise)" if n_noise_viz > 0 else ")"),
-                width=800,
-                height=600,
-                color_discrete_map={k: 'red' if 'Noise' in v else None for k, v in color_map.items()}
-            )
-            # Make noise points more visible
-            if -1 in labels_viz:
-                fig_2d.update_traces(
-                    marker=dict(size=8, opacity=0.6),
-                    selector=dict(name='-1')
+            st.divider()
+            
+            # Train models button
+            train_btn = st.button("🚀 Train Regression Models", use_container_width=True, type="primary")
+            
+            if train_btn:
+                with st.spinner("Training regression models... This may take a while."):
+                    try:
+                        # Initialize trainer with clustered results dataset
+                        trainer = RegressionTrainer(
+                            dataset_path=clustered_dataset_path,
+                            target_column=target_column,
+                            test_size=test_size,
+                            random_state=42
+                        )
+                        
+                        # Load and prepare data (Cluster column will be used if include_clusters=True)
+                        X, y = trainer.load_and_prepare_data(
+                            include_cluster_labels=include_clusters,
+                            cluster_labels=None  # Cluster column is already in the dataset
+                        )
+                        trainer.split_data(X, y)
+                        
+                        st.session_state.regression_trainer = trainer
+                        results = {}
+                        
+                        # Train Random Forest
+                        if use_rf:
+                            with st.spinner("Training Random Forest..."):
+                                rf_results = trainer.train_random_forest(
+                                    use_optimization=use_optimization,
+                                    n_trials=n_trials,
+                                    cv=cv_folds
+                                )
+                                results['Random Forest'] = rf_results
+                        
+                        # Train LightGBM
+                        if use_lgbm:
+                            with st.spinner("Training LightGBM..."):
+                                lgbm_results = trainer.train_lightgbm(
+                                    use_optimization=use_optimization,
+                                    n_trials=n_trials,
+                                    cv=cv_folds
+                                )
+                                if lgbm_results is not None:
+                                    results['LightGBM'] = lgbm_results
+                                else:
+                                    st.warning("LightGBM training failed. Install with: pip install lightgbm")
+                        
+                        if results:
+                            st.session_state.regression_results = results
+                            
+                            # Create comparison DataFrame
+                            comparator = ModelComparator()
+                            comparison_df = comparator.create_comparison_dataframe(results)
+                            st.session_state.regression_comparison_df = comparison_df
+                            
+                            # Select best model
+                            best_model_name = comparator.select_best_model(results, metric='r2_score', use_cv=True)
+                            st.session_state.best_regression_model = best_model_name
+                            
+                            st.success(f"✅ Training complete! Best model: **{best_model_name}**")
+                            st.rerun()
+                        else:
+                            st.error("❌ No models were trained. Please select at least one model.")
+                    
+                    except Exception as e:
+                        st.error(f"❌ Training error: {str(e)}")
+                        import traceback
+                        st.code(traceback.format_exc())
+            
+            # Display results if available
+            if st.session_state.regression_results:
+                st.divider()
+                
+                # Model Comparison
+                st.subheader("📊 Model Comparison")
+                
+                if st.session_state.regression_comparison_df is not None:
+                    st.dataframe(st.session_state.regression_comparison_df, use_container_width=True)
+                    
+                    # Best model indicator
+                    if st.session_state.best_regression_model:
+                        st.success(f"🏆 Best Model: **{st.session_state.best_regression_model}**")
+                
+                # Visualizations
+                st.subheader("📈 Model Performance Visualizations")
+                
+                comparator = ModelComparator()
+                
+                # Comprehensive comparison
+                fig_comprehensive = comparator.create_comprehensive_comparison(st.session_state.regression_results)
+                st.plotly_chart(fig_comprehensive, use_container_width=True)
+                
+                # Radar chart
+                col_viz1, col_viz2 = st.columns(2)
+                with col_viz1:
+                    st.write("**Radar Chart (CV Metrics)**")
+                    fig_radar = comparator.create_radar_chart(st.session_state.regression_results, use_cv=True)
+                    st.plotly_chart(fig_radar, use_container_width=True)
+                
+                with col_viz2:
+                    st.write("**R² Score Comparison**")
+                    fig_r2 = comparator.create_bar_comparison(
+                        st.session_state.regression_results, 
+                        metric='r2_score',
+                        use_cv=True
+                    )
+                    st.plotly_chart(fig_r2, use_container_width=True)
+                
+                st.divider()
+                
+                # Model-specific details
+                st.subheader("🔍 Model Details")
+                
+                model_selection = st.selectbox(
+                    "Select Model to View Details",
+                    options=list(st.session_state.regression_results.keys())
                 )
-            st.plotly_chart(fig_2d, use_container_width=True)
+                
+                model_results = st.session_state.regression_results[model_selection]
+                
+                # Metrics
+                col_met1, col_met2, col_met3, col_met4 = st.columns(4)
+                test_metrics = model_results.get('test_metrics', {})
+                with col_met1:
+                    st.metric("R² Score (Test)", f"{test_metrics.get('r2_score', 0):.4f}")
+                with col_met2:
+                    st.metric("RMSE (Test)", f"{test_metrics.get('rmse', 0):.4f}")
+                with col_met3:
+                    st.metric("MAE (Test)", f"{test_metrics.get('mae', 0):.4f}")
+                with col_met4:
+                    st.metric("MAPE (Test)", f"{test_metrics.get('mape', 0):.2f}%")
+                
+                # Prediction vs True values scatter plot
+                st.subheader("📉 Prediction vs True Values")
+                col_pred1, col_pred2 = st.columns(2)
+                
+                with col_pred1:
+                    st.write("**Test Set**")
+                    fig_test = go.Figure()
+                    fig_test.add_trace(go.Scatter(
+                        x=model_results['true_values']['test'],
+                        y=model_results['predictions']['test'],
+                        mode='markers',
+                        name='Predictions',
+                        marker=dict(color='blue', opacity=0.6)
+                    ))
+                    # Perfect prediction line
+                    min_val = min(min(model_results['true_values']['test']), 
+                                 min(model_results['predictions']['test']))
+                    max_val = max(max(model_results['true_values']['test']), 
+                                 max(model_results['predictions']['test']))
+                    fig_test.add_trace(go.Scatter(
+                        x=[min_val, max_val],
+                        y=[min_val, max_val],
+                        mode='lines',
+                        name='Perfect Prediction',
+                        line=dict(color='red', dash='dash')
+                    ))
+                    fig_test.update_layout(
+                        title="Prediction vs True Values (Test Set)",
+                        xaxis_title="True Values",
+                        yaxis_title="Predicted Values",
+                        showlegend=True
+                    )
+                    st.plotly_chart(fig_test, use_container_width=True)
+                
+                with col_pred2:
+                    st.write("**Residuals Distribution**")
+                    residuals = model_results['true_values']['test'] - model_results['predictions']['test']
+                    fig_residuals = go.Figure()
+                    fig_residuals.add_trace(go.Histogram(
+                        x=residuals,
+                        nbinsx=30,
+                        name='Residuals',
+                        marker_color='green'
+                    ))
+                    fig_residuals.update_layout(
+                        title="Residuals Distribution (Test Set)",
+                        xaxis_title="Residuals (True - Predicted)",
+                        yaxis_title="Frequency",
+                        showlegend=False
+                    )
+                    st.plotly_chart(fig_residuals, use_container_width=True)
+                
+                # Feature importance
+                st.subheader("🎯 Feature Importance")
+                feature_importance = model_results.get('feature_importance')
+                if feature_importance is not None:
+                    fig_importance = px.bar(
+                        feature_importance.head(15),
+                        x='importance',
+                        y='feature',
+                        orientation='h',
+                        title="Top 15 Most Important Features",
+                        labels={'importance': 'Importance Score', 'feature': 'Feature'}
+                    )
+                    fig_importance.update_layout(yaxis={'categoryorder': 'total ascending'})
+                    st.plotly_chart(fig_importance, use_container_width=True)
+                    
+                    st.dataframe(feature_importance, use_container_width=True)
+                
+                st.divider()
+                
+                # Prediction on new data
+                st.subheader("🔮 Predict New ESG Scores")
+                
+                if st.session_state.regression_trainer and st.session_state.best_regression_model:
+                    best_model_obj = st.session_state.regression_results[st.session_state.best_regression_model]['model']
+                    
+                    # Get feature names
+                    feature_names = st.session_state.regression_trainer.feature_names
+                    
+                    # Load clustered dataset to get reference values
+                    clustered_df_ref = pd.read_csv(clustered_dataset_path)
+                    
+                    # Create input form
+                    with st.form("prediction_form"):
+                        st.write("Enter feature values for prediction:")
+                        input_data = {}
+                        
+                        # Create columns for inputs
+                        n_cols = 3
+                        cols = st.columns(n_cols)
+                        
+                        for idx, feature in enumerate(feature_names):
+                            col_idx = idx % n_cols
+                            with cols[col_idx]:
+                                if feature == 'Cluster' or feature == 'Cluster_Label':
+                                    # Get unique cluster labels from clustered dataset
+                                    if 'Cluster' in clustered_df_ref.columns:
+                                        unique_clusters = sorted(clustered_df_ref['Cluster'].unique())
+                                    else:
+                                        unique_clusters = [0, 1, 2, 3, 4]  # Fallback
+                                    input_data[feature] = st.selectbox(
+                                        f"{feature}",
+                                        options=unique_clusters,
+                                        key=f"input_{feature}"
+                                    )
+                                else:
+                                    # Get min/max from clustered dataset for scaling reference
+                                    if feature in clustered_df_ref.columns:
+                                        min_val = float(clustered_df_ref[feature].min())
+                                        max_val = float(clustered_df_ref[feature].max())
+                                        mean_val = float(clustered_df_ref[feature].mean())
+                                    else:
+                                        min_val = 0
+                                        max_val = 100
+                                        mean_val = 50
+                                    
+                                    input_data[feature] = st.number_input(
+                                        f"{feature}",
+                                        min_value=min_val,
+                                        max_value=max_val,
+                                        value=mean_val,
+                                        key=f"input_{feature}"
+                                    )
+                        
+                        predict_btn = st.form_submit_button("🔮 Predict ESG Score", use_container_width=True)
+                        
+                        if predict_btn:
+                            try:
+                                # Create DataFrame from input
+                                input_df = pd.DataFrame([input_data])
+                                
+                                # Preprocess input using trainer's scaler and imputer
+                                if st.session_state.regression_trainer:
+                                    trainer = st.session_state.regression_trainer
+                                    
+                                    # Get ESG feature columns (exclude Cluster if present, we'll add it back)
+                                    cluster_val = None
+                                    if 'Cluster' in input_df.columns:
+                                        cluster_val = input_df['Cluster'].values[0]
+                                        input_df_features = input_df.drop(columns=['Cluster'])
+                                    else:
+                                        input_df_features = input_df.copy()
+                                    
+                                    # Impute missing values
+                                    input_imputed = pd.DataFrame(
+                                        trainer.imputer.transform(input_df_features),
+                                        columns=input_df_features.columns,
+                                        index=input_df_features.index
+                                    )
+                                    
+                                    # Scale features
+                                    input_scaled = pd.DataFrame(
+                                        trainer.scaler.transform(input_imputed),
+                                        columns=input_imputed.columns,
+                                        index=input_imputed.index
+                                    )
+                                    
+                                    # Add Cluster back if it was included
+                                    if cluster_val is not None:
+                                        input_scaled['Cluster'] = cluster_val
+                                    
+                                    # Ensure column order matches training data
+                                    input_scaled = input_scaled[feature_names]
+                                    
+                                    # Make prediction
+                                    prediction = best_model_obj.predict(input_scaled)
+                                    
+                                    st.success(f"✅ **Predicted ESG Score: {prediction[0]:.2f}**")
+                                    
+                                    # Show prediction details
+                                    with st.expander("📋 Prediction Details"):
+                                        st.write("**Input Features:**")
+                                        st.dataframe(input_df, use_container_width=True)
+                                        st.write(f"**Predicted ESG Score:** {prediction[0]:.4f}")
+                                else:
+                                    st.error("❌ Trainer not available. Please train models first.")
+                                
+                            except Exception as e:
+                                st.error(f"❌ Prediction error: {str(e)}")
+                                import traceback
+                                st.code(traceback.format_exc())
+                
+                # Download model
+                st.divider()
+                st.subheader("💾 Save Model")
+                
+                if st.session_state.best_regression_model:
+                    best_model_obj = st.session_state.regression_results[st.session_state.best_regression_model]['model']
+                    
+                    # Save model
+                    model_path = "models/best_model.pkl"
+                    os.makedirs("models", exist_ok=True)
+                    
+                    with open(model_path, 'wb') as f:
+                        pickle.dump(best_model_obj, f)
+                    
+                    st.success(f"✅ Model saved to {model_path}")
+                    
+                    # Download button
+                    with open(model_path, 'rb') as f:
+                        model_bytes = f.read()
+                    
+                    st.download_button(
+                        label="📥 Download Best Model (Pickle)",
+                        data=model_bytes,
+                        file_name="best_esg_prediction_model.pkl",
+                        mime="application/octet-stream"
+                    )
+                
+                # Download predictions
+                st.subheader("📊 Download Predictions")
+                
+                if st.session_state.regression_trainer:
+                    # Create predictions DataFrame
+                    predictions_df = pd.DataFrame({
+                        'True_Value': model_results['true_values']['test'],
+                        'Predicted_Value': model_results['predictions']['test'],
+                        'Residual': model_results['true_values']['test'] - model_results['predictions']['test'],
+                        'Absolute_Error': np.abs(model_results['true_values']['test'] - model_results['predictions']['test'])
+                    })
+                    
+                    csv = predictions_df.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Download Test Predictions (CSV)",
+                        data=csv,
+                        file_name="esg_predictions.csv",
+                        mime="text/csv"
+                    )
+    
+    # Tab 7: Comparaison Clustering
+    with tab7:
+        st.header("⚖️ Comparaison: Avec vs Sans Clustering")
+        
+        # Check if both results are available
+        sans_clustering_path = "prediction_sans_cls/metrics_sans_clustering.csv"
+        avec_clustering_available = st.session_state.regression_results is not None
+        
+        if not os.path.exists(sans_clustering_path):
+            st.warning("⚠️ **Résultats sans clustering non trouvés.**")
+            st.info("💡 **Instructions**: Exécutez d'abord `prediction_sans_cls/pretraitement.py` pour générer les métriques sans clustering.")
+        elif not avec_clustering_available:
+            st.warning("⚠️ **Résultats avec clustering non disponibles.**")
+            st.info("💡 **Instructions**: Allez dans l'onglet '🔮 ESG Score Prediction' et entraînez les modèles avec clustering.")
+        else:
+            # Load metrics without clustering
+            metrics_sans_cls = pd.read_csv(sans_clustering_path)
             
-            # 3D PCA Plot
-            st.subheader("3D PCA Visualization")
-            fig_3d = px.scatter_3d(
-                x=st.session_state.data_pca_3d['PC1'],
-                y=st.session_state.data_pca_3d['PC2'],
-                z=st.session_state.data_pca_3d['PC3'],
-                color=labels_viz.astype(str),
-                labels={'color': 'Cluster'},
-                title=f"3D PCA Plot - {model_selection.upper()} ({n_clusters_viz} clusters" + 
-                      (f" + {n_noise_viz} noise)" if n_noise_viz > 0 else ")"),
-                width=800,
-                height=600,
-                color_discrete_map={'-1': 'red'} if -1 in labels_viz else None
-            )
-            st.plotly_chart(fig_3d, use_container_width=True)
-            
-            # Cluster size distribution
-            st.subheader("Cluster Size Distribution")
-            cluster_counts = pd.Series(labels_viz).value_counts().sort_index()
-            
-            # Separate noise from clusters for better visualization
-            if -1 in cluster_counts.index:
-                noise_count = cluster_counts[-1]
-                cluster_counts_clean = cluster_counts.drop(-1)
-                st.info(f"⚠️ **Points de bruit (outliers)**: {noise_count} points avec label -1 (non inclus dans les clusters)")
+            # Get metrics with clustering
+            if st.session_state.regression_comparison_df is None:
+                st.warning("⚠️ **Résultats avec clustering non disponibles.**")
+                st.info("💡 **Instructions**: Allez dans l'onglet '🔮 ESG Score Prediction' et entraînez les modèles avec clustering.")
             else:
-                cluster_counts_clean = cluster_counts
+                metrics_avec_cls = st.session_state.regression_comparison_df.copy()
+                
+                # Prepare comparison
+                st.subheader("📊 Comparaison des Métriques")
+                
+                # Create comparison table
+                comparison_data = []
+                
+                # Get best model from clustering results
+                best_model_cls = st.session_state.best_regression_model
+                
+                # Compare Random Forest
+                r2_improvement_rf = None
+                rmse_improvement_rf = None
+                mae_improvement_rf = None
+                rf_sans = metrics_sans_cls[metrics_sans_cls['Model'] == 'Random Forest (Sans Clustering)'].iloc[0]
+                if 'Random Forest' in metrics_avec_cls['Model'].values:
+                    rf_avec = metrics_avec_cls[metrics_avec_cls['Model'] == 'Random Forest'].iloc[0]
+                    
+                    # Calculate improvement
+                    r2_improvement_rf = ((rf_avec['R² Score (Test)'] - rf_sans['R2_Score']) / abs(rf_sans['R2_Score'])) * 100 if rf_sans['R2_Score'] != 0 else 0
+                    rmse_improvement_rf = ((rf_sans['RMSE'] - rf_avec['RMSE (Test)']) / rf_sans['RMSE']) * 100 if rf_sans['RMSE'] != 0 else 0
+                    mae_improvement_rf = ((rf_sans['MAE'] - rf_avec['MAE (Test)']) / rf_sans['MAE']) * 100 if rf_sans['MAE'] != 0 else 0
+                    
+                    comparison_data.append({
+                        'Modèle': 'Random Forest',
+                        'Méthode': 'Sans Clustering',
+                        'R² Score': rf_sans['R2_Score'],
+                        'RMSE': rf_sans['RMSE'],
+                        'MAE': rf_sans['MAE'],
+                        'MAPE (%)': rf_sans['MAPE']
+                    })
+                    comparison_data.append({
+                        'Modèle': 'Random Forest',
+                        'Méthode': 'Avec Clustering',
+                        'R² Score': rf_avec['R² Score (Test)'],
+                        'RMSE': rf_avec['RMSE (Test)'],
+                        'MAE': rf_avec['MAE (Test)'],
+                        'MAPE (%)': rf_avec['MAPE (Test)']
+                    })
+                    comparison_data.append({
+                        'Modèle': 'Random Forest',
+                        'Méthode': 'Amélioration (%)',
+                        'R² Score': f"{r2_improvement_rf:+.2f}%",
+                        'RMSE': f"{rmse_improvement_rf:+.2f}%",
+                        'MAE': f"{mae_improvement_rf:+.2f}%",
+                        'MAPE (%)': "-"
+                    })
+                
+                # Compare XGBoost/LightGBM
+                r2_improvement_lgbm = None
+                rmse_improvement_lgbm = None
+                mae_improvement_lgbm = None
+                xgb_sans = metrics_sans_cls[metrics_sans_cls['Model'] == 'XGBoost (Sans Clustering)'].iloc[0]
+                if 'LightGBM' in metrics_avec_cls['Model'].values:
+                    lgbm_avec = metrics_avec_cls[metrics_avec_cls['Model'] == 'LightGBM'].iloc[0]
+                    
+                    r2_improvement_lgbm = ((lgbm_avec['R² Score (Test)'] - xgb_sans['R2_Score']) / abs(xgb_sans['R2_Score'])) * 100 if xgb_sans['R2_Score'] != 0 else 0
+                    rmse_improvement_lgbm = ((xgb_sans['RMSE'] - lgbm_avec['RMSE (Test)']) / xgb_sans['RMSE']) * 100 if xgb_sans['RMSE'] != 0 else 0
+                    mae_improvement_lgbm = ((xgb_sans['MAE'] - lgbm_avec['MAE (Test)']) / xgb_sans['MAE']) * 100 if xgb_sans['MAE'] != 0 else 0
+                    
+                    comparison_data.append({
+                        'Modèle': 'XGBoost/LightGBM',
+                        'Méthode': 'Sans Clustering (XGBoost)',
+                        'R² Score': xgb_sans['R2_Score'],
+                        'RMSE': xgb_sans['RMSE'],
+                        'MAE': xgb_sans['MAE'],
+                        'MAPE (%)': xgb_sans['MAPE']
+                    })
+                    comparison_data.append({
+                        'Modèle': 'XGBoost/LightGBM',
+                        'Méthode': 'Avec Clustering (LightGBM)',
+                        'R² Score': lgbm_avec['R² Score (Test)'],
+                        'RMSE': lgbm_avec['RMSE (Test)'],
+                        'MAE': lgbm_avec['MAE (Test)'],
+                        'MAPE (%)': lgbm_avec['MAPE (Test)']
+                    })
+                    comparison_data.append({
+                        'Modèle': 'XGBoost/LightGBM',
+                        'Méthode': 'Amélioration (%)',
+                        'R² Score': f"{r2_improvement_lgbm:+.2f}%",
+                        'RMSE': f"{rmse_improvement_lgbm:+.2f}%",
+                        'MAE': f"{mae_improvement_lgbm:+.2f}%",
+                        'MAPE (%)': "-"
+                    })
             
-            # Calculate number of clusters (excluding noise)
-            n_clusters_actual = len(cluster_counts_clean)
-            st.metric("Nombre de clusters", n_clusters_actual)
+                comparison_df = pd.DataFrame(comparison_data)
+                st.dataframe(comparison_df, use_container_width=True)
+                
+                st.divider()
+                
+                # Determine if clustering improved prediction
+                st.subheader("🎯 Conclusion: Le Clustering a-t-il Amélioré la Prédiction ?")
+                
+                # Analyze improvements
+                improvements = []
+                conclusions = []
+                
+                if 'Random Forest' in metrics_avec_cls['Model'].values and r2_improvement_rf is not None:
+                    if r2_improvement_rf > 0:
+                        improvements.append(f"✅ **Random Forest**: R² amélioré de {r2_improvement_rf:.2f}%")
+                        conclusions.append("Random Forest: Clustering améliore la prédiction")
+                    elif r2_improvement_rf < -1:
+                        improvements.append(f"❌ **Random Forest**: R² diminué de {abs(r2_improvement_rf):.2f}%")
+                        conclusions.append("Random Forest: Clustering n'améliore pas la prédiction")
+                    else:
+                        improvements.append(f"➡️ **Random Forest**: R² similaire ({r2_improvement_rf:+.2f}%)")
+                        conclusions.append("Random Forest: Clustering n'a pas d'impact significatif")
             
-            fig_bar = px.bar(
-                x=cluster_counts_clean.index.astype(str),
-                y=cluster_counts_clean.values,
-                labels={'x': 'Cluster', 'y': 'Count'},
-                title=f"Taille des Clusters (Total: {n_clusters_actual} clusters)"
-            )
-            st.plotly_chart(fig_bar, use_container_width=True)
-            
-            # Show noise information if present
-            if -1 in cluster_counts.index:
-                st.warning(f"📊 **Information**: HDBSCAN utilise le label **-1** pour marquer les points de bruit (outliers). "
-                          f"Vous avez {n_clusters_actual} clusters (labels 0 à {n_clusters_actual-1}) et {noise_count} points de bruit (label -1).")
+                if 'LightGBM' in metrics_avec_cls['Model'].values and r2_improvement_lgbm is not None:
+                    if r2_improvement_lgbm > 0:
+                        improvements.append(f"✅ **LightGBM**: R² amélioré de {r2_improvement_lgbm:.2f}%")
+                        conclusions.append("LightGBM: Clustering améliore la prédiction")
+                    elif r2_improvement_lgbm < -1:
+                        improvements.append(f"❌ **LightGBM**: R² diminué de {abs(r2_improvement_lgbm):.2f}%")
+                        conclusions.append("LightGBM: Clustering n'améliore pas la prédiction")
+                    else:
+                        improvements.append(f"➡️ **LightGBM**: R² similaire ({r2_improvement_lgbm:+.2f}%)")
+                        conclusions.append("LightGBM: Clustering n'a pas d'impact significatif")
+                
+                # Overall conclusion
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.write("**Améliorations par Modèle:**")
+                    for imp in improvements:
+                        st.write(imp)
+                
+                with col2:
+                    # Count positive vs negative
+                    positive_count = sum(1 for c in conclusions if "améliore" in c)
+                    negative_count = sum(1 for c in conclusions if "n'améliore pas" in c)
+                    neutral_count = sum(1 for c in conclusions if "pas d'impact" in c)
+                    
+                    if positive_count > negative_count + neutral_count:
+                        st.success("🎉 **CONCLUSION GLOBALE**: Le clustering **AMÉLIORE** la prédiction !")
+                        st.balloons()
+                    elif negative_count > positive_count + neutral_count:
+                        st.error("⚠️ **CONCLUSION GLOBALE**: Le clustering **N'AMÉLIORE PAS** la prédiction.")
+                    else:
+                        st.info("➡️ **CONCLUSION GLOBALE**: Le clustering a un **IMPACT NEUTRE** sur la prédiction.")
+                
+                st.divider()
+                
+                # Visualizations
+                st.subheader("📈 Visualisations Comparatives")
+                
+                # Create comparison charts
+                col_viz1, col_viz2 = st.columns(2)
+                
+                with col_viz1:
+                    # R² Score comparison
+                    models_comp = []
+                    r2_sans = []
+                    r2_avec = []
+                    
+                    if 'Random Forest' in metrics_avec_cls['Model'].values and r2_improvement_rf is not None:
+                        models_comp.append('Random Forest')
+                        r2_sans.append(rf_sans['R2_Score'])
+                        r2_avec.append(rf_avec['R² Score (Test)'])
+                    
+                    if 'LightGBM' in metrics_avec_cls['Model'].values and r2_improvement_lgbm is not None:
+                        models_comp.append('XGBoost/LightGBM')
+                        r2_sans.append(xgb_sans['R2_Score'])
+                        r2_avec.append(lgbm_avec['R² Score (Test)'])
+                    
+                    fig_r2 = go.Figure()
+                    fig_r2.add_trace(go.Bar(
+                        name='Sans Clustering',
+                        x=models_comp,
+                        y=r2_sans,
+                        marker_color='lightblue'
+                    ))
+                    fig_r2.add_trace(go.Bar(
+                        name='Avec Clustering',
+                        x=models_comp,
+                        y=r2_avec,
+                        marker_color='lightgreen'
+                    ))
+                    fig_r2.update_layout(
+                        title="Comparaison R² Score",
+                        xaxis_title="Modèle",
+                        yaxis_title="R² Score",
+                        barmode='group'
+                    )
+                    st.plotly_chart(fig_r2, use_container_width=True)
+                
+                with col_viz2:
+                    # RMSE comparison
+                    rmse_sans = []
+                    rmse_avec = []
+                    
+                    if 'Random Forest' in metrics_avec_cls['Model'].values and r2_improvement_rf is not None:
+                        rmse_sans.append(rf_sans['RMSE'])
+                        rmse_avec.append(rf_avec['RMSE (Test)'])
+                    
+                    if 'LightGBM' in metrics_avec_cls['Model'].values and r2_improvement_lgbm is not None:
+                        rmse_sans.append(xgb_sans['RMSE'])
+                        rmse_avec.append(lgbm_avec['RMSE (Test)'])
+                    
+                    fig_rmse = go.Figure()
+                    fig_rmse.add_trace(go.Bar(
+                        name='Sans Clustering',
+                        x=models_comp,
+                        y=rmse_sans,
+                        marker_color='lightcoral'
+                    ))
+                    fig_rmse.add_trace(go.Bar(
+                        name='Avec Clustering',
+                        x=models_comp,
+                        y=rmse_avec,
+                        marker_color='lightgreen'
+                    ))
+                    fig_rmse.update_layout(
+                        title="Comparaison RMSE (plus bas = mieux)",
+                        xaxis_title="Modèle",
+                        yaxis_title="RMSE",
+                        barmode='group'
+                    )
+                    st.plotly_chart(fig_rmse, use_container_width=True)
+                
+                # MAE comparison
+                col_viz3, col_viz4 = st.columns(2)
+                
+                with col_viz3:
+                    mae_sans = []
+                    mae_avec = []
+                    
+                    if 'Random Forest' in metrics_avec_cls['Model'].values and r2_improvement_rf is not None:
+                        mae_sans.append(rf_sans['MAE'])
+                        mae_avec.append(rf_avec['MAE (Test)'])
+                    
+                    if 'LightGBM' in metrics_avec_cls['Model'].values and r2_improvement_lgbm is not None:
+                        mae_sans.append(xgb_sans['MAE'])
+                        mae_avec.append(lgbm_avec['MAE (Test)'])
+                    
+                    fig_mae = go.Figure()
+                    fig_mae.add_trace(go.Bar(
+                        name='Sans Clustering',
+                        x=models_comp,
+                        y=mae_sans,
+                        marker_color='lightsalmon'
+                    ))
+                    fig_mae.add_trace(go.Bar(
+                        name='Avec Clustering',
+                        x=models_comp,
+                        y=mae_avec,
+                        marker_color='lightgreen'
+                    ))
+                    fig_mae.update_layout(
+                        title="Comparaison MAE (plus bas = mieux)",
+                        xaxis_title="Modèle",
+                        yaxis_title="MAE",
+                        barmode='group'
+                    )
+                    st.plotly_chart(fig_mae, use_container_width=True)
+                
+                with col_viz4:
+                    # Improvement percentage chart
+                    improvements_r2 = []
+                    improvements_rmse = []
+                    
+                    if 'Random Forest' in metrics_avec_cls['Model'].values and r2_improvement_rf is not None:
+                        improvements_r2.append(r2_improvement_rf)
+                        improvements_rmse.append(rmse_improvement_rf)
+                    
+                    if 'LightGBM' in metrics_avec_cls['Model'].values and r2_improvement_lgbm is not None:
+                        improvements_r2.append(r2_improvement_lgbm)
+                        improvements_rmse.append(rmse_improvement_lgbm)
+                    
+                    fig_improvement = go.Figure()
+                    fig_improvement.add_trace(go.Bar(
+                        name='R² Amélioration (%)',
+                        x=models_comp,
+                        y=improvements_r2,
+                        marker_color='green' if all(x > 0 for x in improvements_r2) else 'red' if all(x < 0 for x in improvements_r2) else 'orange'
+                    ))
+                    fig_improvement.add_hline(y=0, line_dash="dash", line_color="gray")
+                    fig_improvement.update_layout(
+                        title="Amélioration avec Clustering (%)",
+                        xaxis_title="Modèle",
+                        yaxis_title="Amélioration (%)",
+                        barmode='group'
+                    )
+                    st.plotly_chart(fig_improvement, use_container_width=True)
+                
+                st.divider()
+                
+                # Download comparison
+                st.subheader("💾 Télécharger la Comparaison")
+                comparison_csv = comparison_df.to_csv(index=False)
+                st.download_button(
+                    label="📥 Télécharger Comparaison (CSV)",
+                    data=comparison_csv,
+                    file_name="comparaison_clustering.csv",
+                    mime="text/csv"
+                )
     
     # Clear cache
     if clear_cache_btn:

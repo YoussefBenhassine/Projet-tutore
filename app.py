@@ -21,6 +21,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from typing import Dict, Optional
 from xai_shap import render_shap_dashboard
+from explainability.pdp_explainer import render_pdp_analysis
 
 from xai_shap import render_shap_local_prediction
 from Clustering.preprocessing import DataPreprocessor
@@ -32,6 +33,7 @@ from training.train_regressors import RegressionTrainer
 from utils.model_selection import ModelComparator
 from evaluation.regression_metrics import RegressionMetrics
 import pickle
+import joblib
 import os
 
 # Page configuration
@@ -189,7 +191,7 @@ def main():
         clear_cache_btn = st.button("🗑️ Clear Cache", use_container_width=True)
     
     # Main content
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "📋 Dataset", 
         "🔧 Preprocessing", 
         "🎯 Clustering", 
@@ -197,6 +199,7 @@ def main():
         "📈 Visualizations",
         "🔮 ESG Score Prediction",
         "⚖️ Comparaison Clustering",
+        "🧠 Interprétabilité (XAI)",
     ])
     
     # Tab 1: Dataset
@@ -1189,32 +1192,6 @@ def main():
                 
                 st.divider()
                 
-                # 🎯 Feature Importance
-              # ── Interprétabilité XAI (SHAP) ───────────────────────────────────────
-                st.divider()
-
-                with st.expander("🔍 Interprétabilité du meilleur modèle (SHAP)"):
-
-                 trainer = st.session_state.get("regression_trainer")
-                 best_model_name = st.session_state.get("best_regression_model")
-                 regression_results = st.session_state.get("regression_results", {})
-
-                if (
-                trainer is not None
-                 and best_model_name is not None
-                 and best_model_name in regression_results
-                                ):
-                 best_model = regression_results[best_model_name]["model"]
-                 render_shap_dashboard(best_model, trainer)
-
-                else:
-                 st.warning(
-            "⚠️ Aucun modèle entraîné pour le moment.\n\n"
-            "Veuillez entraîner un modèle de régression afin d'afficher "
-            "l'analyse d'interprétabilité SHAP."
-        )
-
-                st.divider()      
                 # Prediction on new data
                 st.subheader("🔮 Predict New ESG Scores")
                 
@@ -1357,12 +1334,20 @@ def main():
                 if st.session_state.best_regression_model:
                     best_model_obj = st.session_state.regression_results[st.session_state.best_regression_model]['model']
                     
-                    # Save model
+                    # Save model using joblib
                     model_path = "models/best_model.pkl"
                     os.makedirs("models", exist_ok=True)
                     
-                    with open(model_path, 'wb') as f:
-                        pickle.dump(best_model_obj, f)
+                    # Extract the underlying scikit-learn/LightGBM model if it's a wrapper
+                    if hasattr(best_model_obj, 'model') and best_model_obj.model is not None:
+                        # It's a wrapper class, save the internal model
+                        actual_model = best_model_obj.model
+                    else:
+                        # It's already the model itself
+                        actual_model = best_model_obj
+                    
+                    # Use joblib to save the actual model
+                    joblib.dump(actual_model, model_path)
                     
                     st.success(f"✅ Model saved to {model_path}")
                     
@@ -1717,6 +1702,76 @@ def main():
                     file_name="comparaison_clustering.csv",
                     mime="text/csv"
                 )
+    
+    # Tab 8: Interprétabilité XAI (SHAP + PDP)
+    with tab8:
+        st.header("🧠 Interprétabilité du Meilleur Modèle (XAI)")
+        
+        trainer = st.session_state.get("regression_trainer")
+        best_model_name = st.session_state.get("best_regression_model")
+        regression_results = st.session_state.get("regression_results", {})
+        
+        if (
+            trainer is not None
+            and best_model_name is not None
+            and best_model_name in regression_results
+        ):
+            best_model_wrapper = regression_results[best_model_name]["model"]
+            
+            # Extract the underlying model from the wrapper class
+            if hasattr(best_model_wrapper, 'model') and best_model_wrapper.model is not None:
+                # It's a wrapper class (RandomForestRegressorModel or LightGBMRegressorModel)
+                actual_model = best_model_wrapper.model
+            else:
+                # It's already the model itself
+                actual_model = best_model_wrapper
+            
+            st.success(f"✅ Modèle analysé: **{best_model_name}**")
+            
+            st.markdown("""
+            Cette section vous permet d'analyser et d'interpréter les prédictions du meilleur modèle 
+            à l'aide de deux techniques complémentaires d'IA explicable (XAI):
+            
+            - **SHAP (SHapley Additive exPlanations)**: Explique la contribution de chaque variable à une prédiction
+            - **PDP (Partial Dependence Plots)**: Montre l'effet marginal des variables, y compris l'impact des clusters
+            """)
+            
+            st.divider()
+            
+            # Créer des onglets pour SHAP et PDP
+            tab_shap, tab_pdp = st.tabs(["📊 SHAP Analysis", "📈 Partial Dependence Plots (PDP)"])
+            
+            with tab_shap:
+                st.markdown("### 📊 SHAP - Explication des Prédictions")
+                st.info("""
+                **SHAP** (SHapley Additive exPlanations) explique la contribution de chaque variable 
+                à une prédiction spécifique en attribuant une valeur d'importance basée sur la théorie des jeux.
+                
+                **Utilisations:**
+                - Identifier les variables les plus influentes
+                - Comprendre les prédictions individuelles
+                - Détecter les biais du modèle
+                """)
+                render_shap_dashboard(actual_model, trainer)
+            
+            with tab_pdp:
+                render_pdp_analysis(actual_model, trainer, best_model_name)
+        
+        else:
+            st.warning(
+                "⚠️ Aucun modèle entraîné pour le moment.\n\n"
+                "Veuillez entraîner un modèle de régression dans l'onglet '🔮 ESG Score Prediction' "
+                "afin d'afficher l'analyse d'interprétabilité (SHAP + PDP)."
+            )
+            
+            st.info("""
+            **💡 Instructions:**
+            
+            1. Allez dans l'onglet **🔮 ESG Score Prediction**
+            2. Configurez et entraînez un modèle (Random Forest ou LightGBM)
+            3. Assurez-vous d'activer **"Include Cluster Labels"** pour analyser l'impact du clustering
+            4. Revenez ici pour voir les analyses SHAP et PDP
+            """)
     
     # Clear cache
     if clear_cache_btn:

@@ -192,11 +192,7 @@ def main():
         clear_cache_btn = st.button("🗑️ Clear Cache", use_container_width=True)
     
     # Main content
-<<<<<<< HEAD
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-=======
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
->>>>>>> pdp-explainability
         "📋 Dataset", 
         "🔧 Preprocessing", 
         "🎯 Clustering", 

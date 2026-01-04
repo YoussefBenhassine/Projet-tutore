@@ -10,3 +10,4 @@ lightgbm>=4.0.0
 optuna>=3.0.0
 xgboost>=2.0.0
 sdv>=1.0.0
+lime>=0.2.0

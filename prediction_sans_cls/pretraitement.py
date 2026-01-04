@@ -1,4 +1,8 @@
 # ============================================================
+# PHASE DE PRÉTRAITEMENT DES DONNÉES ESG
+# ============================================================
+
+# ============================================================
 # 1. IMPORTATION DES LIBRAIRIES
 # ============================================================
 import pandas as pd
@@ -49,6 +53,40 @@ df = df.dropna(subset=['ESG_Score'])
 
 # One-hot encoding des colonnes catégorielles
 df = pd.get_dummies(df, columns=categorical_columns, drop_first=True)
+=======
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.feature_selection import SelectFromModel
+import os
+
+# ============================================================
+# 2. CHARGEMENT DU DATASET
+# ============================================================
+dataset_path = "data/esg_dataset.csv"
+if not os.path.exists(dataset_path):
+    dataset_path = "esg_dataset.csv"
+
+df = pd.read_csv(dataset_path)
+
+# Colonnes catégorielles
+categorical_columns = ['Sector']
+
+# ============================================================
+# 3. NETTOYAGE DES DONNÉES
+# ============================================================
+
+# Conversion des colonnes non numériques
+# 🔴 MODIFICATION UNIQUE ICI (Sector est exclu)
+for col in df.columns:
+    if df[col].dtype == 'object' and col not in categorical_columns:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+
+# Suppression des lignes où ESG_Score est manquant
+df = df.dropna(subset=['ESG_Score'])
+
+# Encodage One-Hot des variables catégorielles
+df = pd.get_dummies(df, columns=categorical_columns)
+>>>>>>> pdp-explainability
 
 print("Colonnes après nettoyage :", df.columns)
 
@@ -93,6 +131,7 @@ selected_features = X.columns[selector.get_support()]
 X_selected = X[selected_features]
 
 print("Features sélectionnées :", selected_features)
+<<<<<<< HEAD
 
 # ============================================================
 # 6. TRAIN / TEST SPLIT

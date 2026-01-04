@@ -22,6 +22,7 @@ import plotly.graph_objects as go
 from typing import Dict, Optional
 from xai_shap import render_shap_dashboard
 from explainability.pdp_explainer import render_pdp_analysis
+from explainability.lime_explainer import render_lime_analysis
 
 from xai_shap import render_shap_local_prediction
 from Clustering.preprocessing import DataPreprocessor
@@ -1730,16 +1731,17 @@ def main():
             
             st.markdown("""
             Cette section vous permet d'analyser et d'interpréter les prédictions du meilleur modèle 
-            à l'aide de deux techniques complémentaires d'IA explicable (XAI):
+            à l'aide de trois techniques complémentaires d'IA explicable (XAI):
             
             - **SHAP (SHapley Additive exPlanations)**: Explique la contribution de chaque variable à une prédiction
             - **PDP (Partial Dependence Plots)**: Montre l'effet marginal des variables, y compris l'impact des clusters
+            - **LIME (Local Interpretable Model-agnostic Explanations)**: Explique les prédictions individuelles avec des modèles locaux interprétables
             """)
             
             st.divider()
             
-            # Créer des onglets pour SHAP et PDP
-            tab_shap, tab_pdp = st.tabs(["📊 SHAP Analysis", "📈 Partial Dependence Plots (PDP)"])
+            # Créer des onglets pour SHAP, PDP et LIME
+            tab_shap, tab_pdp, tab_lime = st.tabs(["📊 SHAP Analysis", "📈 Partial Dependence Plots (PDP)", "🍋 LIME Analysis"])
             
             with tab_shap:
                 st.markdown("### 📊 SHAP - Explication des Prédictions")
@@ -1756,12 +1758,26 @@ def main():
             
             with tab_pdp:
                 render_pdp_analysis(actual_model, trainer, best_model_name)
+            
+            with tab_lime:
+                st.markdown("### 🍋 LIME - Explications Locales")
+                st.info("""
+                **LIME** (Local Interpretable Model-agnostic Explanations) explique les prédictions individuelles 
+                en créant des modèles locaux interprétables autour de chaque prédiction.
+                
+                **Avantages:**
+                - Explications locales faciles à comprendre
+                - Compatible avec tous les types de modèles
+                - Identifie les features les plus importantes pour chaque prédiction
+                - Montre l'impact positif/négatif de chaque variable
+                """)
+                render_lime_analysis(actual_model, trainer, best_model_name)
         
         else:
             st.warning(
                 "⚠️ Aucun modèle entraîné pour le moment.\n\n"
                 "Veuillez entraîner un modèle de régression dans l'onglet '🔮 ESG Score Prediction' "
-                "afin d'afficher l'analyse d'interprétabilité (SHAP + PDP)."
+                "afin d'afficher l'analyse d'interprétabilité (SHAP + PDP + LIME)."
             )
             
             st.info("""
@@ -1770,7 +1786,7 @@ def main():
             1. Allez dans l'onglet **🔮 ESG Score Prediction**
             2. Configurez et entraînez un modèle (Random Forest ou LightGBM)
             3. Assurez-vous d'activer **"Include Cluster Labels"** pour analyser l'impact du clustering
-            4. Revenez ici pour voir les analyses SHAP et PDP
+            4. Revenez ici pour voir les analyses SHAP, PDP et LIME
             """)
     
     # Clear cache

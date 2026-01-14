@@ -271,11 +271,12 @@ def render_lime_analysis(model, trainer, model_name: str = "Model"):
                     
                     # Créer une visualisation personnalisée si as_pyplot_figure ne fonctionne pas
                     try:
-                        fig, ax = plt.subplots(figsize=(10, max(6, len(exp_df) * 0.4)))
                         explanation.as_pyplot_figure()
+                        fig = plt.gcf()
+                        fig.set_size_inches(10, max(6, len(exp_df) * 0.4))
                         plt.tight_layout()
                         st.pyplot(fig)
-                        plt.close(fig)
+                        
                     except Exception:
                         # Visualisation alternative avec matplotlib
                         fig, ax = plt.subplots(figsize=(10, max(6, len(exp_df) * 0.4)))
@@ -424,11 +425,11 @@ def render_lime_analysis(model, trainer, model_name: str = "Model"):
                 # Visualisation
                 st.markdown("**📈 Graphique LIME:**")
                 try:
-                    fig, ax = plt.subplots(figsize=(10, max(6, len(exp_df) * 0.4)))
                     explanation.as_pyplot_figure()
+                    fig = plt.gcf()  # Récupérer la figure courante
+                    fig.set_size_inches(10, max(6, len(exp_df) * 0.4))
                     plt.tight_layout()
                     st.pyplot(fig)
-                    plt.close(fig)
                 except Exception:
                     # Visualisation alternative avec matplotlib
                     fig, ax = plt.subplots(figsize=(10, max(6, len(exp_df) * 0.4)))
